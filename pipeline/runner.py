@@ -22,7 +22,7 @@ from config.settings import FETCH_LOOKBACK_DAYS, TICKERS
 from db.connection import get_connection
 from pipeline.auditor import create_run_placeholder, update_run
 from pipeline.fetcher import fetch_all
-from pipeline.loader import insert_errors, load
+from pipeline.loader import insert_errors, load, refresh_reporting
 from pipeline.transformer import transform
 from pipeline.validator import validate
 
@@ -55,6 +55,13 @@ def run_pipeline(lookback_days: int | None = None, tickers: list[str] | None = N
 
         ready = transform(clean, conn)
         rows_inserted = load(ready, conn)
+
+        # Refresh the reporting layer (best-effort): a reporting hiccup must not
+        # fail a load whose data is already committed.
+        try:
+            refresh_reporting(conn)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Reporting refresh skipped: {}", exc)
 
         status = "PARTIAL" if rows_rejected else "SUCCESS"
 

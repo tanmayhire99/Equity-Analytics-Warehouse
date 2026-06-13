@@ -59,6 +59,13 @@ def load(df: pd.DataFrame, conn) -> int:
     return len(returned)
 
 
+def refresh_reporting(conn) -> None:
+    """Refresh the reporting materialized view via the stored procedure."""
+    with conn.cursor() as cur:
+        cur.execute("CALL sp_refresh_reporting()")
+    conn.commit()
+
+
 def insert_errors(conn, errors: list[dict]) -> int:
     """Insert rejected rows into error_log; return the number inserted."""
     if not errors:

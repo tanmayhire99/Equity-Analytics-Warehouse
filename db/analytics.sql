@@ -167,3 +167,104 @@ $$;
 --   which filter on date across all stocks.
 -- ---------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_fact_prices_date ON fact_prices (date_id);
+
+
+-- ---------------------------------------------------------------------------
+-- Materialized view: per-stock snapshot for fast consumer reads
+--   Pre-computes the expensive per-stock aggregates (latest quote, 52-week
+--   high/low, 30-day return and average volume) so downstream consumers (e.g.
+--   the MIDAS app's get_quote) read one indexed row instead of re-scanning the
+--   fact table on every call. Refreshed by sp_refresh_reporting() after loads.
+-- ---------------------------------------------------------------------------
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_stock_snapshot AS
+WITH latest AS (
+    SELECT DISTINCT ON (fp.stock_id)
+        fp.stock_id,
+        d.full_date AS latest_date,
+        fp.close    AS latest_close,
+        fp.vwap     AS latest_vwap,
+        fp.volume   AS latest_volume
+    FROM fact_prices fp
+    JOIN dim_date d ON fp.date_id = d.date_id
+    ORDER BY fp.stock_id, d.full_date DESC
+),
+w52 AS (
+    SELECT fp.stock_id, MAX(fp.high) AS high_52w, MIN(fp.low) AS low_52w
+    FROM fact_prices fp
+    JOIN dim_date d ON fp.date_id = d.date_id
+    WHERE d.full_date >= CURRENT_DATE - INTERVAL '365 days'
+    GROUP BY fp.stock_id
+),
+w30 AS (
+    SELECT DISTINCT ON (fp.stock_id)
+        fp.stock_id,
+        AVG(fp.volume) OVER (PARTITION BY fp.stock_id) AS avg_vol_30d,
+        FIRST_VALUE(fp.close) OVER w AS close_30d_ago,
+        LAST_VALUE(fp.close)  OVER w AS close_latest
+    FROM fact_prices fp
+    JOIN dim_date d ON fp.date_id = d.date_id
+    WHERE d.full_date >= CURRENT_DATE - INTERVAL '30 days'
+    WINDOW w AS (
+        PARTITION BY fp.stock_id ORDER BY d.full_date
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    )
+)
+SELECT
+    s.ticker,
+    s.company_name,
+    s.sector,
+    l.latest_date,
+    l.latest_close,
+    l.latest_vwap,
+    l.latest_volume,
+    w52.high_52w,
+    w52.low_52w,
+    ROUND(w30.avg_vol_30d)                                                       AS avg_vol_30d,
+    ROUND((w30.close_latest - w30.close_30d_ago) / NULLIF(w30.close_30d_ago, 0) * 100, 2) AS return_30d_pct
+FROM dim_stock s
+LEFT JOIN latest l   ON s.stock_id = l.stock_id
+LEFT JOIN w52        ON s.stock_id = w52.stock_id
+LEFT JOIN w30        ON s.stock_id = w30.stock_id;
+
+-- Unique index enables REFRESH ... CONCURRENTLY (non-blocking refresh) at scale
+-- and speeds single-ticker consumer lookups.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_stock_snapshot_ticker ON mv_stock_snapshot (ticker);
+
+
+-- ---------------------------------------------------------------------------
+-- Stored PROCEDURES (vs the FUNCTION above)
+--   Procedures perform actions/maintenance and return no result set; they are
+--   invoked with CALL and — unlike functions — may manage transactions
+--   (COMMIT/ROLLBACK). (Note: in MySQL/SQL Server a PROCEDURE *can* return a
+--   result set; that engine difference is why fn_ticker_report is a FUNCTION
+--   here — see the portability notes.)
+-- ---------------------------------------------------------------------------
+
+-- Refresh the reporting layer. Called after each successful load (automation)
+-- and safe to run inside the pipeline's transaction. Swap in
+-- "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_stock_snapshot" for non-blocking
+-- refreshes at scale (requires the unique index above and autocommit).
+CREATE OR REPLACE PROCEDURE sp_refresh_reporting()
+LANGUAGE plpgsql AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW mv_stock_snapshot;
+    RAISE NOTICE 'mv_stock_snapshot refreshed';
+END;
+$$;
+
+-- Data-retention maintenance: delete error_log rows older than the retention
+-- window. Demonstrates procedure transaction control via COMMIT, so it must be
+-- called on an autocommit connection (a standalone maintenance job), e.g.:
+--     CALL sp_purge_old_errors(90);
+CREATE OR REPLACE PROCEDURE sp_purge_old_errors(p_retention_days INT DEFAULT 90)
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_deleted INT;
+BEGIN
+    DELETE FROM error_log
+    WHERE logged_at < NOW() - make_interval(days => p_retention_days);
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    COMMIT;
+    RAISE NOTICE 'Purged % error_log row(s) older than % days', v_deleted, p_retention_days;
+END;
+$$;
