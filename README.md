@@ -90,6 +90,12 @@ MySQL 8+, SQL Server 2019+, and SingleStore with minor syntax adjustments
 | `vw_top_movers_30d` | View | Top gainers/losers over 30 days (window functions, one row per stock) |
 | `vw_volume_anomalies` | View | Days with volume > 2 std-devs above the 30-day mean (z-score) |
 | `fn_ticker_report()` | Function | OHLCV + VWAP + 7-day/30-day moving averages for a ticker + date range |
+| `mv_stock_snapshot` | Materialized view | Pre-aggregated per-stock snapshot (latest quote, 52w range, 30d return) for fast consumer reads |
+| `sp_refresh_reporting()` | Procedure | Refreshes `mv_stock_snapshot`; called automatically after each load |
+| `sp_purge_old_errors(days)` | Procedure | Data-retention maintenance (demonstrates procedure transaction control) |
+
+A `FUNCTION` is used for `fn_ticker_report` because PostgreSQL procedures cannot
+return result sets; procedures are reserved for actions (refresh, retention).
 
 ### SQL Views as a Virtual Data Layer
 
@@ -132,8 +138,16 @@ python scheduler.py
 
 ## Switching to Supabase (cloud PostgreSQL)
 
-Point `DATABASE_URL` in `.env` at your Supabase connection string and re-run
-`python setup_db.py`. Nothing else changes — same code, same SQL.
+Set `DATABASE_URL_SUPABASE` in `.env` (Supabase → Settings → Database → Session
+pooler URI; URL-encode special chars in the password), then run with
+`DB_TARGET=supabase`:
+
+```bash
+DB_TARGET=supabase python setup_db.py
+DB_TARGET=supabase python run_backfill.py
+```
+
+Nothing else changes — same code, same SQL.
 
 ## Running Tests
 
@@ -141,14 +155,45 @@ Point `DATABASE_URL` in `.env` at your Supabase connection string and re-run
 pytest tests/ -v
 ```
 
-## Data Consumer
+[GitHub Actions CI](.github/workflows/ci.yml) runs the suite on every push: it
+spins up PostgreSQL, applies the full schema + analytics via `setup_db.py` (so
+the SQL is validated too), then runs `pytest`. DB-backed tests skip cleanly when
+no database is present.
+
+## Consumer API
+
+[`consumer_api.py`](consumer_api.py) is a small read-only client over the
+analytics layer — the stable contract downstream apps call instead of hitting
+market APIs at query time:
+
+```python
+import consumer_api
+consumer_api.get_quote("RELIANCE")           # latest price, 52w range, 30d return
+consumer_api.get_history("TCS")              # OHLCV + VWAP + 7d/30d moving averages
+consumer_api.get_top_movers(limit=10)        # 30-day gainers/losers
+consumer_api.get_sector_performance()        # weekly return by sector
+```
+
+It reads only views/function/snapshot (never the physical tables) and returns
+JSON-native types, so consumers stay decoupled from the schema.
+
+## Data Consumer (MIDAS)
 
 This warehouse is the data backend for
 [MIDAS — Agent-Driven Financial Intelligence](https://github.com/tanmayhire99/MultiAgentFinanceApp).
-MIDAS queries the SQL views and `fn_ticker_report()` to ground its multi-agent
-portfolio analysis in validated, structured market data instead of hitting raw
-APIs at query time.
+MIDAS can back its Indian-stock quote and historical/technical lookups with
+`consumer_api` instead of hitting raw APIs at query time. (Fundamentals such as
+P/E and market cap are not in the NSE bhavcopy and remain the app's own concern.)
+
+## Cross-Engine Portability
+
+The schema and analytics are ported to **MySQL 8** and verified running — see
+[`docs/portability.md`](docs/portability.md), with dialect variants in
+[`db/schema_mysql.sql`](db/schema_mysql.sql) and
+[`db/analytics_mysql.sql`](db/analytics_mysql.sql). The same patterns translate
+to SQL Server and SingleStore.
 
 ## Docs
 
 - [`docs/query_performance.md`](docs/query_performance.md) — `EXPLAIN ANALYZE` index evidence
+- [`docs/portability.md`](docs/portability.md) — MySQL 8 port and dialect deltas
