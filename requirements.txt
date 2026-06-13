@@ -1,0 +1,10 @@
+# Pinned to versions verified working on Python 3.14.
+# jugaad-data is the India-first NSE source (official bhavcopy); it replaces
+# yfinance, which mishandles Indian corporate actions and is frequently blocked.
+jugaad-data==0.33.1
+pandas==3.0.3
+psycopg2-binary==2.9.12
+python-dotenv==1.2.2
+loguru==0.7.3
+APScheduler==3.11.2
+pytest==9.1.0

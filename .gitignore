@@ -1,0 +1,32 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# jugaad-data local cache
+.cache/
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Test cache
+.pytest_cache/
+.ruff_cache/
+
+# Data exports (never commit raw data)
+*.csv
+*.parquet
