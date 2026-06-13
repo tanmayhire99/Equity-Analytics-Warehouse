@@ -19,12 +19,17 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 
 # --- Database -------------------------------------------------------------
-# Local PostgreSQL (Docker) by default; override via .env to point at Supabase
-# or a native local install. The pipeline never hard-codes credentials.
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL",
-    "postgresql://equity_user:equity_pass@localhost:5433/equity_db",
-)
+# Environment-driven target: DB_TARGET=local (default) uses DATABASE_URL;
+# DB_TARGET=supabase uses DATABASE_URL_SUPABASE. Switching cloud<->local is a
+# one-line env change with no code edits. Credentials are never hard-coded.
+DB_TARGET: str = os.getenv("DB_TARGET", "local").lower()
+
+_LOCAL_DEFAULT = "postgresql://equity_user:equity_pass@localhost:5433/equity_db"
+
+if DB_TARGET == "supabase":
+    DATABASE_URL: str = os.getenv("DATABASE_URL_SUPABASE") or os.getenv("DATABASE_URL", _LOCAL_DEFAULT)
+else:
+    DATABASE_URL = os.getenv("DATABASE_URL", _LOCAL_DEFAULT)
 
 
 # --- Pipeline behaviour ---------------------------------------------------
