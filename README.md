@@ -1,9 +1,9 @@
 # Equity Market Data Pipeline & Analytics Warehouse
 
 An end-to-end, automated data engineering pipeline that ingests daily **NSE**
-equity data, validates it, loads it into a normalized **star schema** on
-PostgreSQL, and exposes SQL views and a table-returning function as a clean
-analytics layer for downstream consumers.
+equity data (a **NIFTY 50** watchlist), validates it, loads it into a normalized
+**star schema** on PostgreSQL, and exposes SQL views and a table-returning
+function as a clean analytics layer for downstream consumers.
 
 Data source is the **official NSE bhavcopy** (via [`jugaad-data`](https://github.com/jugaad-py/jugaad-data)) —
 the same end-of-day file Indian brokers use — so corporate actions and previous
@@ -148,6 +148,24 @@ DB_TARGET=supabase python run_backfill.py
 ```
 
 Nothing else changes — same code, same SQL.
+
+## Orchestration
+
+Two options share the same `pipeline/` code:
+
+- **APScheduler** (lightweight, in-process): `python scheduler.py` — runs the
+  pipeline Mon–Fri at 16:00 IST.
+- **Airflow** (Dockerized, for orchestration + run observability):
+
+  ```bash
+  docker compose -f airflow/docker-compose.yaml up -d --build
+  # http://localhost:8080  (admin / admin)
+  ```
+
+  The `equity_pipeline` DAG runs `ingest → quality_gate → report_snapshot`,
+  reusing the pipeline modules and connecting to the warehouse via
+  `host.docker.internal`. Airflow is purely the orchestrator — the ETL logic
+  lives in one place.
 
 ## Running Tests
 

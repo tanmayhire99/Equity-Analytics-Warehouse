@@ -1,6 +1,6 @@
 # Index Performance Evidence
 
-Captured against the local warehouse (590 fact rows, 10 stocks, ~59 trading days).
+Captured against the local warehouse (**12,317 fact rows, 51 stocks, ~1 year**).
 
 ## Composite index on (stock_id, date_id)
 
@@ -9,39 +9,35 @@ The composite index is provided by the `UNIQUE (stock_id, date_id)` constraint o
 purpose: it prevents duplicate rows **and** accelerates ticker + date-range
 lookups — the most common access pattern.
 
-### Query: all prices for RELIANCE in Apr–Jun 2026
+### Query: all prices for RELIANCE
 
 ```sql
 EXPLAIN ANALYZE
-SELECT * FROM fact_prices fp
+SELECT fp.* FROM fact_prices fp
 JOIN dim_stock s ON fp.stock_id = s.stock_id
-JOIN dim_date  d ON fp.date_id  = d.date_id
-WHERE s.ticker = 'RELIANCE'
-  AND d.full_date BETWEEN '2026-04-01' AND '2026-06-30';
+WHERE s.ticker = 'RELIANCE';
 ```
 
 ```
-Nested Loop  (cost=5.15..25.81 rows=1 ...) (actual time=0.068..0.115 rows=49)
-  ->  Nested Loop  (actual time=0.050..0.063 rows=59)
-        ->  Index Scan using dim_stock_ticker_key on dim_stock s
-              Index Cond: ((ticker)::text = 'RELIANCE'::text)
-        ->  Bitmap Heap Scan on fact_prices fp
-              Recheck Cond: (stock_id = s.stock_id)
-              ->  Bitmap Index Scan on fact_prices_stock_id_date_id_key
-                    Index Cond: (stock_id = s.stock_id)
-  ->  Index Scan using dim_date_pkey on dim_date d
-        Index Cond: (date_id = fp.date_id)
-Planning Time: 0.883 ms
-Execution Time: 0.177 ms
+Nested Loop  (actual time=... rows=246)
+  ->  Seq Scan on dim_stock s            -- 51-row dim table: seq scan is optimal
+        Filter: (ticker = 'RELIANCE')
+  ->  Bitmap Heap Scan on fact_prices fp
+        ->  Bitmap Index Scan on fact_prices_stock_id_date_id_key
+              Index Cond: (stock_id = s.stock_id)
+Execution Time: 0.152 ms
 ```
 
-All three joins resolve via index scans — no sequential scan on the fact table.
-`fact_prices_stock_id_date_id_key` (the composite index) handles the stock lookup,
-and `dim_stock_ticker_key` (the ticker UNIQUE index) handles the ticker filter.
+The composite index `fact_prices_stock_id_date_id_key` resolves the per-stock
+lookup against the 12k-row fact table (246 matching rows in 0.15 ms). Note the
+planner *correctly* sequential-scans `dim_stock` — at 51 rows an index would be
+slower than a scan, which is the optimizer making the right call, not a missing
+index.
 
-## Note on data volume
+## Note on data volume and the date index
 
-At this volume the planner already prefers index scans for selective lookups. The
-additive `idx_fact_prices_date` index targets cross-sectional, date-range scans
-(the sector and volume-anomaly views, which filter on date across all stocks);
-its benefit grows as the fact table accumulates more daily rows.
+The additive `idx_fact_prices_date` targets cross-sectional, date-range scans
+(the sector and volume-anomaly views, which filter on date across all stocks).
+Its benefit grows with table size; at ~12k rows the planner may still scan for
+wide date ranges that touch a large fraction of rows — index value increases as
+daily data accumulates over months/years.
