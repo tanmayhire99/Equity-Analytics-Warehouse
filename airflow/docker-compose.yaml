@@ -13,6 +13,11 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # Keep memory modest for local Docker: fewer gunicorn workers that recycle
+    # periodically (the default 4 workers can OOM a small Docker VM).
+    AIRFLOW__WEBSERVER__WORKERS: '2'
+    AIRFLOW__WEBSERVER__WORKER_REFRESH_INTERVAL: '0'
+    AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: '120'
     PYTHONPATH: /opt/airflow/project
     # Warehouse connection (the equity-pg container on the host).
     DB_TARGET: local

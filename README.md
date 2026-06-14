@@ -162,10 +162,19 @@ Two options share the same `pipeline/` code:
   # http://localhost:8080  (admin / admin)
   ```
 
-  The `equity_pipeline` DAG runs `ingest → quality_gate → report_snapshot`,
-  reusing the pipeline modules and connecting to the warehouse via
-  `host.docker.internal`. Airflow is purely the orchestrator — the ETL logic
-  lives in one place.
+  Airflow is purely the orchestrator — all ETL logic stays in `pipeline/`. DAGs
+  connect to the warehouse via `host.docker.internal` and are triggerable from
+  the UI:
+
+  | DAG | Schedule | Purpose |
+  |---|---|---|
+  | `equity_pipeline` | Mon–Fri 16:00 | Daily ingest → quality_gate → report_snapshot |
+  | `equity_backfill` | manual | On-demand backfill/sync — **"Trigger DAG w/ config"** to set how many days to load |
+  | `equity_maintenance` | manual | Refresh reporting (`sp_refresh_reporting`) + purge old errors (`sp_purge_old_errors`) |
+  | `equity_data_quality` | Mon–Fri 17:00 | Freshness + completeness + error-rate checks; turns red on breach |
+
+  `equity_backfill` and `equity_maintenance` use Airflow **Params**, so the UI
+  renders a form to choose the backfill window or retention period at trigger time.
 
 ## Running Tests
 
