@@ -1,0 +1,8 @@
+# Extra runtime deps the equity pipeline needs inside the Airflow image.
+# pandas is pinned <2.3 to stay compatible with Airflow 2.10's numpy (1.26.x);
+# our pipeline code is version-agnostic across pandas 2.x / 3.x.
+jugaad-data==0.33.1
+pandas>=2.0,<2.3
+psycopg2-binary
+python-dotenv
+loguru
