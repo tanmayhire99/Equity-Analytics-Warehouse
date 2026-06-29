@@ -12,6 +12,12 @@
 -- multi-agent app, dashboards, notebooks) query these stable view/function
 -- interfaces and stay decoupled from the physical fact/dim table layout.
 -- All objects use CREATE OR REPLACE so this file is safe to re-run.
+--
+-- Security: views are created WITH (security_invoker = true) (PostgreSQL 15+) so
+-- they run with the *querying* role's privileges and respect its RLS, rather
+-- than the view owner's. This is the secure default (and what Supabase's linter
+-- expects); without it a public-schema view is effectively SECURITY DEFINER and
+-- can bypass row-level security.
 -- ===========================================================================
 
 
@@ -19,7 +25,8 @@
 -- View 1: Sector-wise weekly performance
 --   Average intraday return and traded volume, grouped by sector and ISO week.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW vw_sector_weekly_performance AS
+CREATE OR REPLACE VIEW vw_sector_weekly_performance
+    WITH (security_invoker = true) AS
 SELECT
     s.sector,
     d.year,
@@ -40,7 +47,8 @@ ORDER BY d.year DESC, d.week_number DESC;
 --   window. FIRST_VALUE/LAST_VALUE are computed per-row, so without DISTINCT ON
 --   the CTE would emit N identical rows per stock (the C-2 bug from the plan).
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW vw_top_movers_30d AS
+CREATE OR REPLACE VIEW vw_top_movers_30d
+    WITH (security_invoker = true) AS
 WITH ranked AS (
     SELECT
         s.ticker,
@@ -74,7 +82,8 @@ ORDER BY ticker, return_30d_pct DESC;
 --   Days where traded volume exceeds the 30-day mean by > 2 standard deviations
 --   (z-score), surfacing unusual activity.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW vw_volume_anomalies AS
+CREATE OR REPLACE VIEW vw_volume_anomalies
+    WITH (security_invoker = true) AS
 WITH avg_volume AS (
     SELECT
         fp.stock_id,
