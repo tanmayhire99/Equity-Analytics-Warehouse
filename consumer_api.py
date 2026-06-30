@@ -90,6 +90,26 @@ def get_history(ticker: str, from_date: dt.date | None = None,
         return _rows_to_dicts(cur)
 
 
+def get_technicals(ticker: str, lookback_days: int = 400, conn=None) -> Optional[dict]:
+    """Derived technicals for a ticker (SMA 20/50/200, trailing returns,
+    annualised volatility, max drawdown) computed from the warehoused close
+    series. Returns None for an unknown ticker or when no history is available.
+
+    Reads the series via :func:`get_history` (the analytics-layer
+    ``fn_ticker_report``), so it stays decoupled from the physical tables.
+    """
+    from pipeline.technicals import compute_technicals
+
+    ticker = ticker.upper()
+    to_date = dt.date.today()
+    from_date = to_date - dt.timedelta(days=lookback_days)
+    history = get_history(ticker, from_date, to_date, conn=conn)
+    if not history:
+        return None
+    return {"ticker": ticker, "as_of": history[-1].get("trade_date"),
+            "lookback_days": lookback_days, **compute_technicals(history)}
+
+
 def get_top_movers(limit: int = 10, conn=None) -> list[dict]:
     """Top gainers/losers over the trailing 30 days (one row per ticker)."""
     with _cursor(conn) as cur:

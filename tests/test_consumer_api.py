@@ -47,6 +47,19 @@ def test_get_history_unknown_ticker_is_empty(conn):
     assert consumer_api.get_history("NOSUCHTICKER", conn=conn) == []
 
 
+def test_get_technicals_shape_or_none(conn):
+    t = consumer_api.get_technicals("RELIANCE", conn=conn)
+    if t is not None:
+        assert t["ticker"] == "RELIANCE"
+        assert "sma_20" in t and "max_drawdown_pct" in t
+        assert "annualized_volatility_pct" in t
+        assert isinstance(t["data_points"], int)
+
+
+def test_get_technicals_unknown_ticker_is_none(conn):
+    assert consumer_api.get_technicals("NOSUCHTICKER", conn=conn) is None
+
+
 def test_get_top_movers_respects_limit_and_order(conn):
     movers = consumer_api.get_top_movers(limit=3, conn=conn)
     assert len(movers) <= 3
