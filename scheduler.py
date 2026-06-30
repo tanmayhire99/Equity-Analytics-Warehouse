@@ -14,14 +14,40 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.blocking import BlockingScheduler
 from loguru import logger
 
+from config import settings
 from config.settings import SCHEDULE_HOUR, SCHEDULE_MINUTE, TIMEZONE
 from pipeline.runner import run_pipeline
+
+
+def daily_job() -> None:
+    """Ingest, then run data-quality checks and alert on failure.
+
+    The quality step is best-effort: a failure is logged + alerted (and the
+    webhook fires if configured) but never crashes the scheduler, so a bad data
+    day doesn't take the daily job process down.
+    """
+    run_pipeline()
+    try:
+        from db.connection import get_connection
+        from pipeline import quality
+
+        conn = get_connection()
+        try:
+            report = quality.run_quality_checks(conn)
+        finally:
+            conn.close()
+        quality.emit_alert(report, webhook_url=settings.QUALITY_ALERT_WEBHOOK or None)
+        if not report.ok:
+            logger.warning("Post-ingest data-quality checks FAILED: {}",
+                           "; ".join(f"{r.name}: {r.detail}" for r in report.failed))
+    except Exception:
+        logger.exception("Post-ingest data-quality step errored (ingestion already completed)")
 
 
 def build_scheduler() -> BlockingScheduler:
     scheduler = BlockingScheduler(timezone=ZoneInfo(TIMEZONE))
     scheduler.add_job(
-        run_pipeline,
+        daily_job,
         trigger="cron",
         day_of_week="mon-fri",
         hour=SCHEDULE_HOUR,

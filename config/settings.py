@@ -50,6 +50,21 @@ SCHEDULE_MINUTE: int = int(os.getenv("SCHEDULE_MINUTE", "0"))
 TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Kolkata")
 
 
+# --- Data-quality monitoring ----------------------------------------------
+# Thresholds for pipeline/quality.py (used by the data-quality DAG, the
+# standalone run_quality.py entrypoint, and the post-ingest scheduler check).
+# Tolerate a long weekend / holiday stretch before freshness is a failure.
+MAX_STALENESS_DAYS: int = int(os.getenv("MAX_STALENESS_DAYS", "5"))
+# Sanity floor: a healthy NIFTY-50 warehouse has thousands of rows; far fewer
+# means it was never backfilled or got truncated.
+MIN_FACT_ROWS: int = int(os.getenv("MIN_FACT_ROWS", "100"))
+# Above this many error_log rows the quality run emits a (non-fatal) WARN.
+QUALITY_ERROR_WARN_THRESHOLD: int = int(os.getenv("QUALITY_ERROR_WARN_THRESHOLD", "100"))
+# Optional Slack-compatible incoming webhook; when set, a FAILing quality run
+# POSTs an alert. Unset = log-only (the DAG still turns red).
+QUALITY_ALERT_WEBHOOK: str = os.getenv("QUALITY_ALERT_WEBHOOK", "")
+
+
 # --- jugaad-data cache ----------------------------------------------------
 # jugaad-data caches NSE responses on disk. We point it at a project-local
 # directory and PRE-CREATE it so its parallel download threads don't race to
